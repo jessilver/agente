@@ -23,15 +23,36 @@ modelo_base_id = "meta-llama/Llama-3.2-3B"
 # ==========================================
 # 2. CARREGAMENTO DOS MODELOS E OTIMIZAÇÃO
 # ==========================================
-print(f"Carregando tokenizer do {modelo_base_id}...")
-tokenizer = AutoTokenizer.from_pretrained(modelo_base_id)
+modelo_base_id = os.environ.get("MODEL_ID", modelo_base_id)
+modelo_fallback = os.environ.get("FALLBACK_MODEL_ID", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 
-print("\nCarregando modelo base na memória VRAM da Placa de Vídeo...")
-model = AutoModelForCausalLM.from_pretrained(
-    modelo_base_id,
-    dtype=torch.bfloat16, 
-    device_map={"": 0}, # Força o uso estrito da GPU primária
-)
+try:
+    print(f"Carregando tokenizer do {modelo_base_id}...")
+    tokenizer = AutoTokenizer.from_pretrained(modelo_base_id, token=True)
+
+    print("\nCarregando modelo base na memória VRAM da Placa de Vídeo...")
+    model = AutoModelForCausalLM.from_pretrained(
+        modelo_base_id,
+        dtype=torch.bfloat16,
+        device_map={"": 0},
+        token=True,
+    )
+except Exception as exc:
+    if modelo_base_id == modelo_fallback:
+        raise RuntimeError(
+            f"Não foi possível carregar o modelo {modelo_base_id}. Verifique o acesso ao Hugging Face e o modelo escolhido. Detalhes: {exc}"
+        ) from exc
+
+    print(f"\n[AVISO] O modelo principal '{modelo_base_id}' não está acessível ({exc})")
+    print(f"Tentando usar o modelo público de fallback: {modelo_fallback}")
+
+    tokenizer = AutoTokenizer.from_pretrained(modelo_fallback)
+    model = AutoModelForCausalLM.from_pretrained(
+        modelo_fallback,
+        dtype=torch.bfloat16,
+        device_map={"": 0},
+    )
+    modelo_base_id = modelo_fallback
 
 print(f"\nInjetando os pesos treinados (LoRA) de: {caminho_modelo_final}...")
 model = PeftModel.from_pretrained(model, caminho_modelo_final)

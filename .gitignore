@@ -5,7 +5,9 @@
 .venv/
 venv/
 .venv_linux
+.venv_nvidia
 env/
+.env
 
 # ==========================================
 # 2. Pesos, Modelos e Checkpoints (CRÍTICO)

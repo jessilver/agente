@@ -1,6 +1,6 @@
 # AGENTE - Sistema de IA Local (CPU e AMD ROCm)
 
-Este repositório contém a estrutura para execução e testes de modelos de Inteligência Artificial localmente, com suporte a execução otimizada via **CPU** e aceleração por **GPU AMD (ROCm)**.
+Este repositório contém a estrutura para execução e testes de modelos de Inteligência Artificial localmente, com suporte a execução otimizada via **CPU**, **GPU NVIDIA (CUDA)** e **GPU AMD (ROCm)**.
 
 ---
 
@@ -15,6 +15,9 @@ AGENTE/
 ├── CPU/
 │   ├── indexCPU.py          # Script principal/configuração para CPU
 │   └── win_ambiente_cpu.bat # Script de automação para Windows (CPU)
+├── NVIDIA/
+│   ├── indexNvidia.py       # Script principal/configuração para GPU NVIDIA
+│   └── win_ambiente_nvidia.bat # Script de automação para Windows (NVIDIA)
 ├── data/                    # Pasta para dados e datasets
 ├── models/                  # Arquivos e pesos dos modelos
 ├── training/                # Scripts e logs de treinamento
@@ -104,6 +107,30 @@ python -m venv .venv
 pip install -r requirements.txt
 python CPU/indexCPU.py
 ```
+
+---
+
+## 🎮 Executando em Ambiente NVIDIA (Windows)
+
+Para rodar no Windows com GPU NVIDIA, use a venv específica do projeto:
+
+```powershell
+cd D:\Codes\PYTHON\UFT\agente
+py -3.12 -m venv .venv_nvidia
+.\.venv_nvidia\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+python -m pip install -r requirements.txt
+python .\NVIDIA\indexNvidia.py
+```
+
+Ou use o script pronto:
+
+```powershell
+.\NVIDIA\win_ambiente_nvidia.bat
+```
+
+> Se o modelo escolhido for restrito da Meta (como `meta-llama/Llama-3.2-3B`), será necessário autenticar-se no Hugging Face com `huggingface-cli login` ou usar um modelo público alternativo.
 
 ---
 
