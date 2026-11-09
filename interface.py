@@ -5,7 +5,8 @@ import customtkinter as ctk
 import chromadb
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from rag_busca import buscar_trechos, formatar_contexto
+from rag_busca import N_CANDIDATOS_RERANK, buscar_trechos, carregar_reranker, formatar_contexto
+from snapshots import Cronometro, salvar_snapshot
 
 # Configuração visual do aplicativo
 ctk.set_appearance_mode("Dark")
@@ -19,6 +20,7 @@ class MotorIA:
         self.model = None
         self.tokenizer = None
         self.encoder_rag = None
+        self.reranker = None
         self.collection = None
         self.pronto = False
 
@@ -34,6 +36,7 @@ class MotorIA:
         
         # 2. Carrega o modelo de buscas semânticas (RAG)
         self.encoder_rag = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+        self.reranker = carregar_reranker("cpu")
 
         # 3. Carrega o modelo de linguagem (LLaMA)
         self.tokenizer = AutoTokenizer.from_pretrained(modelo_base_id)
@@ -55,7 +58,16 @@ class MotorIA:
             return "Erro: A Inteligência Artificial ainda não foi carregada."
 
         # 1. Busca no RAG baseada no que o USUÁRIO digitou (Busca Dinâmica)
-        trechos = buscar_trechos(self.collection, self.encoder_rag, texto_usuario, n_final=3)
+        cron = Cronometro()
+        with cron.etapa("busca_rag"):
+            trechos = buscar_trechos(
+                self.collection,
+                self.encoder_rag,
+                texto_usuario,
+                n_final=3,
+                n_candidatos=N_CANDIDATOS_RERANK if self.reranker is not None else 20,
+                reranker=self.reranker,
+            )
         contexto_legal_recuperado = formatar_contexto(trechos, rotulo="Trecho Legal") if trechos else ""
 
         # 2. Prompt Inteligente: Sabe diferenciar um "Oi" de uma "Portaria"
@@ -86,7 +98,7 @@ class MotorIA:
         # 3. Geração da Resposta pelo LLaMA
         inputs = self.tokenizer(prompt_formatado, return_tensors="pt")
 
-        with torch.no_grad():
+        with cron.etapa("geracao"), torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
                 max_new_tokens=400,
@@ -98,7 +110,20 @@ class MotorIA:
 
         resposta_completa = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         resposta_final = resposta_completa.split("assistant")[-1].strip()
-        
+
+        try:
+            salvar_snapshot(
+                script="interface",
+                dispositivo=str(self.model.device),
+                consulta=texto_usuario,
+                trechos=trechos,
+                resposta=resposta_final,
+                tempos=cron.etapas,
+                extras={"reranker": self.reranker is not None},
+            )
+        except Exception as erro:
+            print(f"Aviso: não foi possível salvar o snapshot: {erro}")
+
         return resposta_final
 
 

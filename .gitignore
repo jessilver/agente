@@ -32,3 +32,5 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+# Snapshots das execuções (gerados localmente pelo snapshots.py)
+snapshots/
