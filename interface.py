@@ -5,6 +5,7 @@ import customtkinter as ctk
 import chromadb
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from rag_busca import buscar_trechos, formatar_contexto
 
 # Configuração visual do aplicativo
 ctk.set_appearance_mode("Dark")
@@ -54,14 +55,8 @@ class MotorIA:
             return "Erro: A Inteligência Artificial ainda não foi carregada."
 
         # 1. Busca no RAG baseada no que o USUÁRIO digitou (Busca Dinâmica)
-        query_embedding = self.encoder_rag.encode([texto_usuario]).tolist()
-        resultados = self.collection.query(query_embeddings=query_embedding, n_results=3)
-
-        contexto_legal_recuperado = ""
-        if resultados and resultados.get("documents") and len(resultados["documents"][0]) > 0:
-            for i, doc in enumerate(resultados["documents"][0]):
-                fonte = resultados["metadatas"][0][i].get("fonte", "Base de Leis")
-                contexto_legal_recuperado += f"\n--- Trecho Legal ({fonte}) ---\n{doc}\n"
+        trechos = buscar_trechos(self.collection, self.encoder_rag, texto_usuario, n_final=3)
+        contexto_legal_recuperado = formatar_contexto(trechos, rotulo="Trecho Legal") if trechos else ""
 
         # 2. Prompt Inteligente: Sabe diferenciar um "Oi" de uma "Portaria"
         system_prompt = (

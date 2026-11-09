@@ -3,6 +3,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 import chromadb
 from sentence_transformers import SentenceTransformer
+from rag_busca import buscar_trechos, formatar_contexto
 
 print("=== TESTANDO O AGENTE COM RAG (EXCLUSIVO PARA CPU) ===")
 
@@ -57,24 +58,8 @@ with open(caminho_txt, "r", encoding="utf-8") as f:
 termo_busca = "gratuidade do SUS taxa cobranca universalidade igualdade acesso atendimento saude Lei 8080 artigo 7 196"
 
 print(f"Buscando leis relevantes no ChromaDB para: '{termo_busca}'")
-query_embedding = encoder_rag.encode([termo_busca]).tolist()
-
-try:
-    resultados = collection.query(
-        query_embeddings=query_embedding,
-        n_results=3
-    )
-except Exception as e:
-    print(f"Erro na consulta: {e}")
-    resultados = None
-
-contexto_legal_recuperado = ""
-if resultados and resultados.get('documents') and len(resultados['documents'][0]) > 0:
-    for i, doc in enumerate(resultados['documents'][0]):
-        fonte = resultados['metadatas'][0][i].get('fonte', 'Base de Leis')
-        contexto_legal_recuperado += f"\n--- Artigo/Trecho Legal ({fonte}) ---\n{doc}\n"
-else:
-    contexto_legal_recuperado = "Nenhum artigo específico foi encontrado na base local."
+trechos = buscar_trechos(collection, encoder_rag, termo_busca, n_final=3)
+contexto_legal_recuperado = formatar_contexto(trechos)
 
 # Estruturação usando o formato oficial de mensagens do LLaMA-3.2-Instruct
 system_prompt = (
