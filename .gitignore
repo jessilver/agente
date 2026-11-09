@@ -6,7 +6,7 @@
 venv/
 .venv_linux
 env/
-
+chroma_db_sus
 # ==========================================
 # 2. Pesos, Modelos e Checkpoints (CRÍTICO)
 # ==========================================

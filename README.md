@@ -20,16 +20,25 @@ contract-review-agent/
 │   └── win_ambiente_cpu.bat              # Instalação do ambiente CPU (Windows)
 ├── NVIDIA/
 │   ├── indexNvidia.py                    # Treinamento QLoRA (4-bit) para NVIDIA CUDA
+│   ├── testModeloNvidia.py               # Teste com RAG na GPU (versão CUDA do testModelo.py)
+│   ├── interfaceNvidia.py                # Interface gráfica com os modelos na VRAM
+│   ├── README.md                         # Requisitos e execução na NVIDIA
 │   └── Fedora-instalar_ambienteNVIDIA.sh # Instalação do ambiente NVIDIA (Fedora)
 ├── data/
+│   ├── leis/                             # Acervo de legislação (.md / .txt: CF88, Lei 8.080, TO)
 │   └── dataset_mestre.jsonl              # Dataset de treino (um JSON por linha, campo "text")
 ├── models/                               # (gerado) adaptador LoRA final em lora_model_saude/
 ├── training/                             # (gerado) checkpoints em checkpoints_salvos/
+├── chroma_db_sus/                        # (gerado/baixado, fora do git) base vetorial do RAG
 ├── .venv_linux/                          # (gerado) ambiente virtual Python (Linux)
 ├── .gitignore
 ├── README.md                             # Este manual de instruções
+├── indexador_rag.py                      # Indexação das leis no ChromaDB com cache incremental em SQLite
+├── interface.py                          # Interface CustomTkinter (GUI + RAG) em CPU
+├── prompt.txt                            # Documento de exemplo analisado pelo testModelo.py
+├── verificardb.py                        # Inspeção da base vetorial
 ├── requirements.txt                      # Dependências do projeto
-├── testModelo.py                         # Teste do modelo treinado em CPU
+├── testModelo.py                         # Teste com RAG em CPU
 └── testModeloGPU.py                      # Teste do modelo treinado em GPU
 ```
 
