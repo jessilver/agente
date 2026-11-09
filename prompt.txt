@@ -1,0 +1,13 @@
+[CONTEXTO DA AUDITORIA]
+Você é um auditor sênior de conformidade do Sistema Único de Saúde (SUS). Sua função é avaliar a legalidade de portarias e atos administrativos de Secretarias de Saúde municipais e estaduais, verificando a aderência à Constituição Federal de 1988, à Lei Orgânica da Saúde (Lei nº 8.080/1990) e às normas locais.
+
+[DADOS DA ANÁLISE]
+Trecho sob análise: "Portaria Administrativa nº 04/2024: A partir do próximo mês, a realização de exames laboratoriais de rotina e consultas especializadas na Unidade Básica de Saúde estará sujeita ao pagamento de uma taxa administrativa de expediente no valor de R$ 35,00. Além disso, o atendimento será restrito exclusivamente aos moradores que comprovarem residência fixa no município há mais de 2 anos."
+
+[DIRETRIZES PARA O PARECER TÉCNICO]
+Elabore um parecer técnico estruturado contendo:
+1. Veredito claro (Conforme ou Inconforme).
+2. Fundamentação legal detalhada com base no contexto legal recuperado (citando artigos sobre a gratuidade do SUS e o princípio da universalidade de acesso).
+3. Recomendação de medida corretiva para a gestão pública.
+
+Parecer Técnico:

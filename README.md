@@ -16,10 +16,13 @@ AGENTE/
 │   ├── indexCPU.py          # Script principal/configuração para CPU
 │   └── win_ambiente_cpu.bat # Script de automação para Windows (CPU)
 ├── data/                    # Pasta para dados e datasets
+    └── leis/                # Acervo de legislação (.md / .txt: CF88, Lei 8.080, TO)
 ├── models/                  # Arquivos e pesos dos modelos
 ├── training/                # Scripts e logs de treinamento
 ├── .gitignore
 ├── README.md                # Este manual de instruções
+├── indexador_rag.py         # Motor de indexação paralela com cache incremental em SQLite
+├── interface.py             # Interface CustomTkinter (GUI + Motor de IA + Comitê Multi-Agente)
 ├── requirements.txt         # Dependências do projeto
 ├── testModelo.py            # Script genérico de teste do modelo (CPU/Padrão)
 └── testModeloGPU.py         # Script de validação/teste utilizando GPU
