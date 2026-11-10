@@ -23,6 +23,9 @@ AGENTE/
 ├── README.md                # Este manual de instruções
 ├── indexador_rag.py         # Motor de indexação paralela com cache incremental em SQLite
 ├── interface.py             # Interface CustomTkinter (GUI + Motor de IA + Comitê Multi-Agente)
+├── rag_busca.py             # Busca nas leis: palavra-chave + vetorial, limpeza, reranker, checagem de citações
+├── snapshots.py             # Registro de cada execução em snapshots/ (JSON + Markdown)
+├── tests/                   # Testes automáticos (pytest), sem precisar da base
 ├── requirements.txt         # Dependências do projeto
 ├── testModelo.py            # Script genérico de teste do modelo (CPU/Padrão)
 └── testModeloGPU.py         # Script de validação/teste utilizando GPU
@@ -119,3 +122,42 @@ python CPU/indexCPU.py
 * **Teste de Detecção de GPU (PyTorch):**
   ```bash
   python3 -c "import torch; print('>>> GPU Detectada pelo PyTorch:', torch.cuda.is_assets = torch.cuda.is_available()); print('>>> Versão PyTorch:', torch.__version__)"
+
+```
+
+---
+
+## 🔎 Busca nas Leis (RAG)
+
+A busca fica em `rag_busca.py` e é usada pelo `testModelo.py` e pela `interface.py`. A base `chroma_db_sus/` (≈ 13 GB, fora do git) é **só lida**: nada é gravado nela.
+
+Etapas de `buscar_trechos()`:
+
+1. **Busca vetorial** nas normas constitucionais/federais e na base inteira.
+2. **Busca por palavra-chave** para os números de lei citados na consulta (`Lei 8080` → `8.080`) e para `palavras_chave=[...]`.
+3. **Descarte** de pastas de trabalho indexadas junto com as leis (`_fonte`, `auditorias`, `backup`, `candidatos`, `_indice`, `_recuperacao`), **limpeza de HTML** e **remoção de duplicados**.
+4. **Metadados corrigidos na leitura**: UF pelo caminho (`estaduais/AC/...`) e número pelo cabeçalho `Norma:`.
+5. **Reranker** multilíngue (`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, ≈ 470 MB, baixado na primeira execução) ordena os candidatos; trechos abaixo de `NOTA_MINIMA` não vão para o prompt.
+
+Depois da geração, `verificar_citacoes()` compara os artigos e leis citados na resposta com os trechos recuperados, e `anotar_citacoes()` acrescenta um aviso com o que **não** veio da base.
+
+Ajustes comuns (constantes no topo de `rag_busca.py`):
+
+| Constante | Padrão | Efeito |
+|---|---|---|
+| `NOTA_MINIMA` | `-5.0` | Mais alta = menos trechos, mais relevantes; `None` desliga o corte |
+| `N_CANDIDATOS_RERANK` | `50` | Candidatos por busca enviados ao reranker (mais = melhor recall, mais lento) |
+| `ESFERAS_PRIORITARIAS` | `constitucional`, `federal` | Esferas buscadas em separado |
+
+## 📸 Snapshots
+
+Cada execução do `testModelo.py` e cada análise da `interface.py` grava `snapshots/<data>_<script>.json` e `.md` com branch/commit, hardware, tempos por etapa, VRAM (em GPU), consulta, trechos (nota, UF, origem), citações confirmadas/fora dos trechos e a resposta. A pasta está no `.gitignore`.
+
+## ✅ Testes Automáticos
+
+Os testes usam uma base falsa, então rodam em segundos e não precisam da `chroma_db_sus/`:
+
+```bash
+pip install pytest
+python -m pytest tests -q
+```

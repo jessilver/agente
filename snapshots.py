@@ -93,11 +93,21 @@ def salvar_snapshot(script, dispositivo, consulta, trechos, resposta, tempos, en
     if "vram_pico_gb" in dados["hardware"]:
         linhas.append(f"- **VRAM (pico):** {dados['hardware']['vram_pico_gb']} GB")
     for chave, valor in (extras or {}).items():
+        if chave == "citacoes":
+            continue
         linhas.append(f"- **{chave}:** {valor}")
+    citacoes = (extras or {}).get("citacoes")
+    if citacoes is not None:
+        fora = [c["citacao"] for c in citacoes if not c["no_contexto"]]
+        dentro = [c["citacao"] for c in citacoes if c["no_contexto"]]
+        linhas.append(f"- **Citações confirmadas nos trechos:** {', '.join(dentro) or 'nenhuma'}")
+        linhas.append(f"- **Citações fora dos trechos:** {', '.join(fora) or 'nenhuma'}")
     linhas += ["", "## Consulta RAG", "", consulta, "", "## Trechos recuperados", ""]
     for i, t in enumerate(trechos, 1):
         nota = f" · nota {t['nota']:.2f}" if t.get("nota") is not None else ""
-        linhas += [f"### {i}. {t['fonte']} ({t['esfera']}{nota})", "", t["texto"], ""]
+        uf = f" · {t['uf']}" if t.get("uf") else ""
+        origem = f" · via {t['origem']}" if t.get("origem") else ""
+        linhas += [f"### {i}. {t['fonte']} ({t['esfera']}{uf}{nota}{origem})", "", t["texto"], ""]
     if entrada:
         linhas += ["## Entrada", "", entrada, ""]
     linhas += ["## Resposta", "", resposta, ""]

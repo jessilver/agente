@@ -34,3 +34,4 @@ __pycache__/
 Thumbs.db
 # Snapshots das execuções (gerados localmente pelo snapshots.py)
 snapshots/
+.pytest_cache/

@@ -5,7 +5,16 @@ import customtkinter as ctk
 import chromadb
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from rag_busca import N_CANDIDATOS_RERANK, buscar_trechos, carregar_reranker, formatar_contexto
+from rag_busca import (
+    N_CANDIDATOS_RERANK,
+    REGRA_CITACOES,
+    anotar_citacoes,
+    aquecer,
+    buscar_trechos,
+    carregar_reranker,
+    formatar_contexto,
+    verificar_citacoes,
+)
 from snapshots import Cronometro, salvar_snapshot
 
 # Configuração visual do aplicativo
@@ -37,6 +46,7 @@ class MotorIA:
         # 2. Carrega o modelo de buscas semânticas (RAG)
         self.encoder_rag = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
         self.reranker = carregar_reranker("cpu")
+        aquecer(self.collection, self.encoder_rag)
 
         # 3. Carrega o modelo de linguagem (LLaMA)
         self.tokenizer = AutoTokenizer.from_pretrained(modelo_base_id)
@@ -76,7 +86,8 @@ class MotorIA:
             "Você deve seguir estas 3 regras INCONDICIONALMENTE:\n\n"
             "REGRA 1 - SAUDAÇÕES: Se o usuário enviar apenas 'oi', 'olá', 'quem é você', apresente-se educadamente e pare por aí.\n\n"
             "REGRA 2 - PERGUNTAS DIRETAS: Se o usuário fizer uma pergunta (ex: 'Existe lei para X?'), responda diretamente BASEANDO-SE EXCLUSIVAMENTE no [CONTEXTO JURÍDICO] fornecido. NUNCA invente nomes de leis, números ou artigos. Se o contexto estiver vazio ou não responder à pergunta, diga: 'Não encontrei essa informação na minha base de leis local.' Não use o formato de Veredito para perguntas.\n\n"
-            "REGRA 3 - AUDITORIA DE DOCUMENTOS: Apenas se o usuário enviar uma Portaria, Decreto, ou ato administrativo para análise, emita um Parecer Técnico estruturado com: 1. Veredito (Conforme/Inconforme), 2. Fundamentação Legal e 3. Recomendação."
+            "REGRA 3 - AUDITORIA DE DOCUMENTOS: Apenas se o usuário enviar uma Portaria, Decreto, ou ato administrativo para análise, emita um Parecer Técnico estruturado com: 1. Veredito (Conforme/Inconforme), 2. Fundamentação Legal e 3. Recomendação.\n\n"
+            "CITAÇÕES: " + REGRA_CITACOES
         )
 
         user_content = (
@@ -110,6 +121,8 @@ class MotorIA:
 
         resposta_completa = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         resposta_final = resposta_completa.split("assistant")[-1].strip()
+        citacoes = verificar_citacoes(resposta_final, trechos, textos_conhecidos=[texto_usuario, system_prompt])
+        resposta_final = anotar_citacoes(resposta_final, citacoes)
 
         try:
             salvar_snapshot(
@@ -119,7 +132,7 @@ class MotorIA:
                 trechos=trechos,
                 resposta=resposta_final,
                 tempos=cron.etapas,
-                extras={"reranker": self.reranker is not None},
+                extras={"reranker": self.reranker is not None, "citacoes": citacoes},
             )
         except Exception as erro:
             print(f"Aviso: não foi possível salvar o snapshot: {erro}")
