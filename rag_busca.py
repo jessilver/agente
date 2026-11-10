@@ -5,6 +5,8 @@ import html
 import re
 
 ESFERAS_PRIORITARIAS = ["constitucional", "federal"]
+MODELO_RERANKER = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+N_CANDIDATOS_RERANK = 25  # por busca (esferas prioritárias + base inteira) => até 50 candidatos
 
 _RE_TAG = re.compile(r"<[^>]*>")
 _RE_TAG_CORTADA = re.compile(r"^[^<>]*>|<[^<>]*$")
@@ -37,11 +39,30 @@ def _consultar(collection, embedding, n_resultados, filtro):
     return list(zip(r["documents"][0], r["metadatas"][0], r["distances"][0]))
 
 
-def buscar_trechos(collection, encoder, consulta, n_final=3, n_candidatos=20, esferas=ESFERAS_PRIORITARIAS):
+def carregar_reranker(dispositivo="cpu"):
+    """Cross-encoder multilíngue que reordena os candidatos pela relevância real para a consulta."""
+    from sentence_transformers import CrossEncoder
+
+    return CrossEncoder(MODELO_RERANKER, device=dispositivo, max_length=512)
+
+
+def buscar_trechos(
+    collection,
+    encoder,
+    consulta,
+    n_final=3,
+    n_candidatos=20,
+    esferas=ESFERAS_PRIORITARIAS,
+    reranker=None,
+    consulta_rerank=None,
+):
     """Retorna até n_final trechos distintos e limpos.
 
-    Primeiro busca nas esferas prioritárias; se faltar trecho, completa com o restante da base.
-    Cada item é um dict com 'texto', 'fonte', 'esfera' e 'distancia'.
+    Sem reranker: primeiro as esferas prioritárias, depois o restante da base, na ordem do ChromaDB.
+    Com reranker: junta os candidatos das duas buscas e ordena todos pela nota do cross-encoder,
+    usando consulta_rerank (frase em linguagem natural) quando informada, senão a própria consulta.
+    Cada item é um dict com 'texto', 'fonte', 'esfera', 'distancia' e 'nota' (None sem reranker).
+    A base é só lida: nenhum dado do ChromaDB é alterado.
     """
     embedding = encoder.encode([consulta]).tolist()
 
@@ -63,10 +84,17 @@ def buscar_trechos(collection, encoder, consulta, n_final=3, n_candidatos=20, es
             "fonte": metadados.get("fonte", "Base de Leis"),
             "esfera": metadados.get("esfera", ""),
             "distancia": distancia,
+            "nota": None,
         })
-        if len(trechos) >= n_final:
-            break
-    return trechos
+
+    if reranker is not None and trechos:
+        pergunta = consulta_rerank or consulta
+        notas = reranker.predict([(pergunta, t["texto"]) for t in trechos], show_progress_bar=False)
+        for t, nota in zip(trechos, notas):
+            t["nota"] = float(nota)
+        trechos.sort(key=lambda t: t["nota"], reverse=True)
+
+    return trechos[:n_final]
 
 
 def formatar_contexto(trechos, rotulo="Artigo/Trecho Legal"):

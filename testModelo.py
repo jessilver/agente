@@ -3,9 +3,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 import chromadb
 from sentence_transformers import SentenceTransformer
-from rag_busca import buscar_trechos, formatar_contexto
+from rag_busca import N_CANDIDATOS_RERANK, buscar_trechos, carregar_reranker, formatar_contexto
+from snapshots import Cronometro, salvar_snapshot
 
 print("=== TESTANDO O AGENTE COM RAG (EXCLUSIVO PARA CPU) ===")
+cron = Cronometro()
 
 # ==========================================
 # 1. CAMINHOS E BANCO VETORIAL
@@ -24,25 +26,29 @@ print(f"Conectando à base vetorial RAG em: {caminho_chroma}...")
 client_chroma = chromadb.PersistentClient(path=caminho_chroma)
 collection = client_chroma.get_or_create_collection(name="base_juridica_sus")
 
-print("Carregando modelo de embedding leve (SentenceTransformer em CPU)...")
-encoder_rag = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+with cron.etapa("carregar_modelos"):
+    print("Carregando modelo de embedding leve (SentenceTransformer em CPU)...")
+    encoder_rag = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
 
-# ==========================================
-# 2. CARREGAMENTO DO MODELO E TOKENIZER
-# ==========================================
-print(f"\nCarregando tokenizer de {modelo_base_id}...")
-tokenizer = AutoTokenizer.from_pretrained(modelo_base_id)
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
+    print("Carregando reranker multilíngue (CrossEncoder em CPU)...")
+    reranker = carregar_reranker("cpu")
 
-print("\nCarregando modelo base na memória RAM...")
-model = AutoModelForCausalLM.from_pretrained(
-    modelo_base_id,
-    dtype=torch.float32,
-    device_map="cpu",
-    low_cpu_mem_usage=True
-)
-model.eval()
+    # ==========================================
+    # 2. CARREGAMENTO DO MODELO E TOKENIZER
+    # ==========================================
+    print(f"\nCarregando tokenizer de {modelo_base_id}...")
+    tokenizer = AutoTokenizer.from_pretrained(modelo_base_id)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    print("\nCarregando modelo base na memória RAM...")
+    model = AutoModelForCausalLM.from_pretrained(
+        modelo_base_id,
+        dtype=torch.float32,
+        device_map="cpu",
+        low_cpu_mem_usage=True
+    )
+    model.eval()
 print("Modelo pronto para uso!\n")
 
 # ==========================================
@@ -56,9 +62,23 @@ with open(caminho_txt, "r", encoding="utf-8") as f:
 
 # Termo focado exclusivamente nos princípios violados para a busca vetorial
 termo_busca = "gratuidade do SUS taxa cobranca universalidade igualdade acesso atendimento saude Lei 8080 artigo 7 196"
+# Frase em linguagem natural usada pelo reranker para escolher os trechos mais relevantes
+pergunta_rerank = (
+    "A cobrança de taxa e a restrição de atendimento por tempo de residência em unidade do SUS "
+    "violam a gratuidade e o acesso universal e igualitário à saúde?"
+)
 
 print(f"Buscando leis relevantes no ChromaDB para: '{termo_busca}'")
-trechos = buscar_trechos(collection, encoder_rag, termo_busca, n_final=3)
+with cron.etapa("busca_rag"):
+    trechos = buscar_trechos(
+        collection,
+        encoder_rag,
+        termo_busca,
+        n_final=3,
+        n_candidatos=N_CANDIDATOS_RERANK,
+        reranker=reranker,
+        consulta_rerank=pergunta_rerank,
+    )
 contexto_legal_recuperado = formatar_contexto(trechos)
 
 # Estruturação usando o formato oficial de mensagens do LLaMA-3.2-Instruct
@@ -94,7 +114,7 @@ print("=" * 60 + "\n")
 inputs = tokenizer(prompt_formatado, return_tensors="pt")
 
 print("Gerando parecer de auditoria...")
-with torch.no_grad():
+with cron.etapa("geracao"), torch.no_grad():
     outputs = model.generate(
         **inputs,
         max_new_tokens=400,
@@ -113,3 +133,15 @@ print("RESPOSTA DO MODELO:")
 print("-" * 60)
 print(resposta_gerada)
 print("=" * 60)
+
+caminho_snapshot = salvar_snapshot(
+    script="testModelo",
+    dispositivo="cpu",
+    consulta=termo_busca,
+    trechos=trechos,
+    resposta=resposta_gerada,
+    tempos=cron.etapas,
+    entrada=texto_entrada,
+    extras={"modelo": modelo_base_id, "pergunta_rerank": pergunta_rerank},
+)
+print(f"Snapshot salvo em: {caminho_snapshot}")
