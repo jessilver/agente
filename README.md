@@ -161,3 +161,30 @@ Os testes usam uma base falsa, então rodam em segundos e não precisam da `chro
 pip install pytest
 python -m pytest tests -q
 ```
+
+## 📚 Normas Federais de Saúde
+
+A base original não tinha a Lei 8.080/1990, a Lei 8.142/1990, a LC 141/2012 nem o Decreto 7.508/2011. Elas ficam em `data/normas_federais_saude/` (texto oficial do Planalto, sem os trechos revogados, um bloco por artigo) e são geradas e indexadas assim:
+
+```bash
+python scripts/importar_normas_planalto.py
+python indexador_rag.py --base data/normas_federais_saude
+```
+
+O indexador só adiciona os arquivos dessa pasta (caminhos `federais/saude/...`); o restante da base não é tocado. Para acrescentar outra norma, inclua-a na lista `NORMAS` do script.
+
+> Antes de qualquer escrita na `chroma_db_sus/`, faça um backup, por exemplo:
+> `7z a -tzip -mx=1 ../backups/chroma_db_sus_AAAA-MM-DD.zip ./chroma_db_sus` e teste com `7z t`.
+
+## ⚠️ Limitações Conhecidas e Próximos Passos
+
+Pendências identificadas e deixadas para as próximas etapas, da mais impactante para a menos:
+
+| # | Limitação | Impacto | Por onde começar |
+|---|---|---|---|
+| 1 | A base usa embeddings em inglês (`all-MiniLM-L6-v2`) | Em perguntas sem termos exatos, os trechos certos muitas vezes nem chegam aos candidatos; o reranker não consegue compensar | Reindexar com um modelo multilíngue (ex.: `intfloat/multilingual-e5-base`) numa **base nova**, comparar com os snapshots e só então substituir a compartilhada |
+| 2 | O indexador inclui pastas de trabalho (`_fonte`, `auditorias`, `backup`, `candidatos`, `_indice`) e marca toda norma de `estaduais/` como UF `TO` | Duplicados e metadados errados; hoje corrigidos só na leitura (`rag_busca.py`) | `coletar_arquivos()` e `classificar_documento()` em `indexador_rag.py`; vale para a próxima reindexação |
+| 3 | `NOTA_MINIMA` separa pouco | Trechos sem relação ainda passam com notas entre -2 e -5 | Testar um reranker maior (ex.: `BAAI/bge-reranker-v2-m3`, viável só em GPU) e recalibrar a nota com os snapshots |
+| 4 | A checagem de citações compara números, não o conteúdo | Uma citação com o número certo e o texto errado não é marcada | Comparar o trecho entre aspas da resposta com o texto recuperado |
+| 5 | A linha NVIDIA (`nvidia/develop`) ainda não tem reranker, snapshots nem as correções de leitura | `NVIDIA/testModeloNvidia.py` e `NVIDIA/interfaceNvidia.py` usam a busca anterior | `sync/develop-to-nvidia` + branch `feat/nvidia-*`, conforme o `BRANCHING.md` |
+| 6 | `data/leis` é um gitlink sem `.gitmodules` | A pasta vem vazia em qualquer clone | O autor do commit `c6683e1` deve adicionar o `.gitmodules` ou versionar os arquivos |
