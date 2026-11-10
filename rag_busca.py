@@ -9,6 +9,8 @@ import hashlib
 import html
 import re
 import unicodedata
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 
 ESFERAS_PRIORITARIAS = ["constitucional", "federal"]
 MODELO_RERANKER = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
@@ -19,20 +21,25 @@ N_CANDIDATOS_PALAVRA = 15  # por palavra-chave
 NOTA_MINIMA = -5.0
 
 # Pastas de trabalho do acervo que foram indexadas junto com as leis (cópias, auditorias, índices).
-_SEGMENTOS_DESCARTADOS = ("_fonte", "_indice", "auditorias", "backup", "candidatos", "_recuperacao")
+# Comparadas só com os nomes de PASTAS do caminho (nunca com o nome do arquivo).
+_PASTAS_DESCARTADAS = {"_fonte", "_indice", "auditorias", "backup", "candidatos"}
+_PREFIXOS_PASTAS_DESCARTADAS = ("_recuperacao",)
+TAMANHO_CACHE = 256
 
 _RE_TAG = re.compile(r"<[^>]*>")
-_RE_TAG_CORTADA = re.compile(r"^[^<>]*>|<[^<>]*$")
+# Restos de tag cortados na borda do chunk: atributos antes de um '>' sem '<' (ex.: 'sans-serif;">'),
+# ou um '<' seguido de nome de tag sem '>' (ex.: '<p style="mar'). Texto comum com '>' é preservado.
+_RE_TAG_CORTADA = re.compile(r'^[^<>]*(?:="|;"|\w")\s*/?>|<[a-zA-Z/][^<>]*$')
 _RE_ESPACOS = re.compile(r"[ \t ]+")
 _RE_LINHAS = re.compile(r"\n\s*\n+")
 _RE_CITACAO_LEI = re.compile(
     r"\blei(?:\s+(?:complementar|ordin[áa]ria|org[âa]nica))?\s*(?:n[º°o]\.?\s*)?(\d{1,2})\.?(\d{3})\b", re.I
 )
 _RE_NORMA = re.compile(r"^Norma: (.*)$", re.M)
-_RE_NUMERO_NORMA = re.compile(r"n[º°o]\.?\s*([\d.]+)", re.I)
+_RE_NUMERO_NORMA = re.compile(r"\bn[º°o]\.?\s*(\d[\d.]*)", re.I)
 _RE_UF = re.compile(r"^estaduais/([A-Z]{2})/")
 
-_cache_consultas = {}
+_cache_consultas = OrderedDict()
 
 
 def limpar_html(texto: str) -> str:
@@ -50,8 +57,13 @@ def _chave(texto: str) -> str:
 
 
 def _descartar(metadados) -> bool:
-    caminho = metadados.get("caminho_relativo", "")
-    return any(segmento in caminho for segmento in _SEGMENTOS_DESCARTADOS)
+    pastas = metadados.get("caminho_relativo", "").split("/")[:-1]
+    return any(p in _PASTAS_DESCARTADAS or p.startswith(_PREFIXOS_PASTAS_DESCARTADAS) for p in pastas)
+
+
+def limpar_cache():
+    """Esvazia o cache de consultas (use depois de alterar a base com o processo aberto)."""
+    _cache_consultas.clear()
 
 
 def corrigir_metadados(metadados, documento):
@@ -66,6 +78,7 @@ def corrigir_metadados(metadados, documento):
     m_norma = _RE_NORMA.search(documento)
     if m_norma:
         norma = m_norma.group(1).strip()
+        # \b exige que "nº"/"no" seja uma palavra própria (não o fim de "Governo 2019")
         m_num = _RE_NUMERO_NORMA.search(norma)
         if m_num:
             numero = m_num.group(1).replace(".", "").strip()
@@ -132,21 +145,26 @@ def buscar_trechos(
     A base é só lida: nenhum dado do ChromaDB é alterado.
     """
     termos = list(dict.fromkeys(extrair_numeros_lei(consulta) + list(palavras_chave or [])))
-    chave_cache = (consulta, consulta_rerank, n_final, n_candidatos, tuple(esferas or ()), tuple(termos),
-                   reranker is not None, nota_minima)
+    chave_cache = (id(collection), consulta, consulta_rerank, n_final, n_candidatos, tuple(esferas or ()),
+                   tuple(termos), id(reranker) if reranker is not None else None, nota_minima)
     if usar_cache and chave_cache in _cache_consultas:
+        _cache_consultas.move_to_end(chave_cache)
         return [dict(t) for t in _cache_consultas[chave_cache]]
 
     embedding = encoder.encode([consulta]).tolist()
 
-    candidatos = []
+    # Consultas independentes: rodam em paralelo (as buscas por palavra-chave são as mais lentas).
+    buscas = []
     if esferas:
-        candidatos += [(*c, "vetorial-prioritaria") for c in
-                       _consultar(collection, embedding, n_candidatos, {"esfera": {"$in": list(esferas)}})]
-    candidatos += [(*c, "vetorial") for c in _consultar(collection, embedding, n_candidatos)]
+        buscas.append(("vetorial-prioritaria", n_candidatos, {"esfera": {"$in": list(esferas)}}, None))
+    buscas.append(("vetorial", n_candidatos, None, None))
     for termo in termos:
-        candidatos += [(*c, f"palavra:{termo}") for c in
-                       _consultar(collection, embedding, N_CANDIDATOS_PALAVRA, filtro_texto={"$contains": termo})]
+        buscas.append((f"palavra:{termo}", N_CANDIDATOS_PALAVRA, None, {"$contains": termo}))
+
+    with ThreadPoolExecutor(max_workers=len(buscas)) as executor:
+        resultados = list(executor.map(lambda b: _consultar(collection, embedding, b[1], b[2], b[3]), buscas))
+
+    candidatos = [(*c, origem) for (origem, *_), res in zip(buscas, resultados) for c in res]
 
     vistos = set()
     trechos = []
@@ -180,6 +198,8 @@ def buscar_trechos(
     resultado = trechos[:n_final]
     if usar_cache:
         _cache_consultas[chave_cache] = [dict(t) for t in resultado]
+        while len(_cache_consultas) > TAMANHO_CACHE:
+            _cache_consultas.popitem(last=False)
     return resultado
 
 
@@ -202,6 +222,19 @@ REGRA_CITACOES = (
 )
 
 _RE_CITACAO_ARTIGO = re.compile(r"\bart(?:igo)?s?\.?\s*(\d+)\s*[º°o]?", re.I)
+# Normas citadas: leis (inclusive complementares), decretos, portarias, resoluções e RDCs, com qualquer número.
+_RE_CITACAO_NORMA = re.compile(
+    r"\b(lei complementar|lc|lei|decreto|portaria|resolu[cç][aã]o|rdc)"
+    r"(?:\s+(?:federal|estadual|municipal|org[aâ]nica|ordin[aá]ria|administrativa|ministerial|conjunta))?"
+    r"\s*(?:n[º°o]\.?\s*)?(\d{1,3}(?:\.\d{3})+|\d{2,})",
+    re.I,
+)
+_TIPOS_NORMA = {"lc": "LC", "lei complementar": "LC", "lei": "Lei", "decreto": "Decreto", "portaria": "Portaria",
+                "rdc": "RDC"}
+# "Art. 7º da Lei nº 8.080", "art. 2º, § 1º, do Decreto 7.508": a norma vem logo depois de "da/do".
+_RE_ARTIGO_DA_NORMA = re.compile(
+    r"^\s*[º°o]?\.?\s*(?:,[^,.;\n]{0,30},)?\s*d[aoe]s?\s+(" + _RE_CITACAO_NORMA.pattern + ")", re.I
+)
 
 
 def _normalizar(texto):
@@ -209,17 +242,49 @@ def _normalizar(texto):
     return "".join(c for c in texto if not unicodedata.combining(c))
 
 
-def verificar_citacoes(resposta, trechos):
-    """Lista as citações (artigos e leis) da resposta e diz se cada uma aparece nos trechos recuperados."""
-    contexto = _normalizar(" ".join(t["texto"] for t in trechos))
-    artigos_contexto = {int(n) for n in _RE_CITACAO_ARTIGO.findall(contexto)}
-    leis_contexto = {a + b for a, b in _RE_CITACAO_LEI.findall(contexto)}
+def _normas(texto):
+    """[(rótulo, número só com dígitos)] das normas citadas no texto."""
+    saida = []
+    for tipo, numero in _RE_CITACAO_NORMA.findall(texto):
+        rotulo = _TIPOS_NORMA.get(_normalizar(tipo), "Resolução")
+        saida.append((f"{rotulo} {numero}", numero.replace(".", "")))
+    return saida
+
+
+def verificar_citacoes(resposta, trechos, textos_conhecidos=()):
+    """Lista as citações da resposta e diz se cada uma é sustentada pelos trechos recuperados.
+
+    - Normas (Lei, LC, Decreto, Portaria, Resolução, RDC): o número precisa aparecer nos trechos ou em
+      textos_conhecidos (ex.: o documento sob análise e o prompt do sistema).
+    - Artigos: se a resposta diz de qual norma ("Art. 7º da Lei nº 8.080"), o MESMO trecho precisa conter o
+      artigo e o número da norma; se não diz, basta o artigo aparecer em algum trecho.
+    """
+    textos = [_normalizar(t["texto"]) for t in trechos]
+    artigos_por_trecho = [{int(n) for n in _RE_CITACAO_ARTIGO.findall(t)} for t in textos]
+    normas_por_trecho = [{num for _, num in _normas(t)} for t in textos]
+    normas_conhecidas = set().union(*normas_por_trecho, *({num for _, num in _normas(_normalizar(x))}
+                                                          for x in textos_conhecidos))
 
     citacoes = []
-    for n in dict.fromkeys(_RE_CITACAO_ARTIGO.findall(resposta)):
-        citacoes.append({"citacao": f"Art. {n}", "no_contexto": int(n) in artigos_contexto})
-    for a, b in dict.fromkeys(_RE_CITACAO_LEI.findall(resposta)):
-        citacoes.append({"citacao": f"Lei {a}.{b}", "no_contexto": a + b in leis_contexto})
+    vistas = set()
+    for m in _RE_CITACAO_ARTIGO.finditer(resposta):
+        artigo = int(m.group(1))
+        da_norma = _RE_ARTIGO_DA_NORMA.match(resposta[m.end():])
+        if da_norma:
+            rotulo, numero = _normas(da_norma.group(1))[0]
+            chave = (artigo, numero)
+            no_contexto = any(artigo in a and numero in n for a, n in zip(artigos_por_trecho, normas_por_trecho))
+            descricao = f"Art. {artigo} ({rotulo})"
+        else:
+            chave = (artigo, None)
+            no_contexto = any(artigo in a for a in artigos_por_trecho)
+            descricao = f"Art. {artigo}"
+        if chave not in vistas:
+            vistas.add(chave)
+            citacoes.append({"citacao": descricao, "no_contexto": no_contexto})
+
+    for rotulo, numero in dict.fromkeys(_normas(resposta)):
+        citacoes.append({"citacao": rotulo, "no_contexto": numero in normas_conhecidas})
     return citacoes
 
 

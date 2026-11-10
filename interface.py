@@ -121,7 +121,7 @@ class MotorIA:
 
         resposta_completa = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         resposta_final = resposta_completa.split("assistant")[-1].strip()
-        citacoes = verificar_citacoes(resposta_final, trechos)
+        citacoes = verificar_citacoes(resposta_final, trechos, textos_conhecidos=[texto_usuario, system_prompt])
         resposta_final = anotar_citacoes(resposta_final, citacoes)
 
         try:

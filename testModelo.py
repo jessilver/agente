@@ -137,7 +137,7 @@ with cron.etapa("geracao"), torch.no_grad():
 # Decodificação isolando apenas a resposta gerada
 resposta_completa = tokenizer.decode(outputs[0], skip_special_tokens=True)
 resposta_gerada = resposta_completa.split("assistant")[-1].strip()
-citacoes = verificar_citacoes(resposta_gerada, trechos)
+citacoes = verificar_citacoes(resposta_gerada, trechos, textos_conhecidos=[texto_entrada, system_prompt])
 resposta_gerada = anotar_citacoes(resposta_gerada, citacoes)
 
 print("\n" + "=" * 60)
@@ -146,14 +146,17 @@ print("-" * 60)
 print(resposta_gerada)
 print("=" * 60)
 
-caminho_snapshot = salvar_snapshot(
-    script="testModelo",
-    dispositivo="cpu",
-    consulta=termo_busca,
-    trechos=trechos,
-    resposta=resposta_gerada,
-    tempos=cron.etapas,
-    entrada=texto_entrada,
-    extras={"modelo": modelo_base_id, "pergunta_rerank": pergunta_rerank, "citacoes": citacoes},
-)
-print(f"Snapshot salvo em: {caminho_snapshot}")
+try:
+    caminho_snapshot = salvar_snapshot(
+        script="testModelo",
+        dispositivo="cpu",
+        consulta=termo_busca,
+        trechos=trechos,
+        resposta=resposta_gerada,
+        tempos=cron.etapas,
+        entrada=texto_entrada,
+        extras={"modelo": modelo_base_id, "pergunta_rerank": pergunta_rerank, "citacoes": citacoes},
+    )
+    print(f"Snapshot salvo em: {caminho_snapshot}")
+except Exception as erro:
+    print(f"Aviso: não foi possível salvar o snapshot: {erro}")

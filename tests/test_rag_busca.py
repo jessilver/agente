@@ -109,7 +109,7 @@ def test_buscar_trechos_faz_busca_por_palavra_chave_e_numero_de_lei():
     col = ColecaoFalsa([doc("Art. 1. texto")])
     rb.buscar_trechos(col, EncoderFalso(), "cobrança Lei 8080", esferas=["federal"], palavras_chave=["gratuidade"])
     filtros_texto = [c["where_document"] for c in col.chamadas if c["where_document"]]
-    assert filtros_texto == [{"$contains": "8.080"}, {"$contains": "gratuidade"}]
+    assert sorted(f["$contains"] for f in filtros_texto) == ["8.080", "gratuidade"]  # rodam em paralelo
     assert {"esfera": {"$in": ["federal"]}} in [c["where"] for c in col.chamadas]
 
 
@@ -160,6 +160,60 @@ def test_verificar_citacoes_separa_o_que_veio_do_contexto():
         {"citacao": "Lei 8.080", "no_contexto": True},
         {"citacao": "Lei 9.514", "no_contexto": False},
     ]
+
+
+def test_verificar_citacoes_exige_artigo_e_norma_no_mesmo_trecho():
+    trechos = [
+        {"texto": "Norma: constituicao\n**Art. 196.** A saúde é direito de todos."},
+        {"texto": "Norma: Lei nº 8.080, de 1990\n**Art. 7º** universalidade de acesso"},
+    ]
+    resposta = (
+        "O Art. 196 da Constituição Federal e a Lei 8.080. O art. 196 da Lei nº 8.080 (inventado). "
+        "O Art. 7º da Lei nº 8.080. O art. 2º, § 1º, do Decreto nº 7.508."
+    )
+    citacoes = {c["citacao"]: c["no_contexto"] for c in rb.verificar_citacoes(resposta, trechos)}
+    assert citacoes["Art. 196"] is True  # sem norma explícita: basta o artigo existir num trecho
+    assert citacoes["Art. 196 (Lei 8.080)"] is False  # Art. 196 é da CF, não da Lei 8.080
+    assert citacoes["Art. 7 (Lei 8.080)"] is True
+    assert citacoes["Art. 2 (Decreto 7.508)"] is False
+
+
+def test_verificar_citacoes_cobre_lc_decreto_e_portaria():
+    resposta = "Viola a LC nº 141/2012, o Decreto nº 7.508/2011 e a Portaria nº 2.436/2017."
+    rotulos = [c["citacao"] for c in rb.verificar_citacoes(resposta, [])]
+    assert rotulos == ["LC 141", "Decreto 7.508", "Portaria 2.436"]
+
+
+def test_verificar_citacoes_aceita_normas_dos_textos_conhecidos():
+    # O documento analisado e o prompt do sistema não são citações inventadas.
+    resposta = "A Portaria Administrativa nº 04/2024 viola a Lei 8.080."
+    conhecidos = ["Portaria Administrativa nº 04/2024: taxa...", "especialista (Constituição, Lei 8.080, etc)"]
+    assert all(c["no_contexto"] for c in rb.verificar_citacoes(resposta, [], textos_conhecidos=conhecidos))
+
+
+def test_descartar_olha_so_as_pastas():
+    assert rb._descartar({"caminho_relativo": "estaduais/AC/_fonte/auditorias/x/backup/a.md"})
+    assert rb._descartar({"caminho_relativo": "estaduais/_indice/_recuperacao-v2-20261016/x.md"})
+    assert not rb._descartar({"caminho_relativo": "estaduais/BA/lei-registro-de-candidatos-backup.md"})
+
+
+def test_limpar_html_preserva_texto_com_sinal_de_maior():
+    assert rb.limpar_html("valor > R$ 10.000,00 por mês") == "valor > R$ 10.000,00 por mês"
+
+
+def test_numero_da_norma_exige_palavra_propria():
+    assert rb.corrigir_metadados({"caminho_relativo": "x.md"}, "Norma: Plano do Governo 2019")["numero"] == ""
+
+
+def test_cache_separa_colecoes_e_tem_limite(monkeypatch):
+    monkeypatch.setattr(rb, "TAMANHO_CACHE", 2)
+    a, b = ColecaoFalsa([doc("A")]), ColecaoFalsa([doc("B")])
+    assert rb.buscar_trechos(a, EncoderFalso(), "q", esferas=None)[0]["texto"] == "A"
+    assert rb.buscar_trechos(b, EncoderFalso(), "q", esferas=None)[0]["texto"] == "B"
+    rb.buscar_trechos(a, EncoderFalso(), "outra", esferas=None)
+    assert len(rb._cache_consultas) == 2
+    rb.limpar_cache()
+    assert len(rb._cache_consultas) == 0
 
 
 def test_anotar_citacoes_so_altera_quando_ha_citacao_fora():
